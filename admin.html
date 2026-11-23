@@ -144,7 +144,7 @@ function render(){
  const qi=$('#q');if(qi&&!sel&&editing===null)qi.focus();
 }
 function loginView(){
- return `<div class="card" style="max-width:420px;margin:30px auto"><h2>後台登入</h2><p class="mu">入庫與後台管理需要管理員登入。<br>暫定帳號 <b>admin</b>、密碼 <b>admin</b>，登入後請到「人員與科室」另設帳號密碼。</p>
+ return `<div class="card" style="max-width:420px;margin:30px auto"><h2>後台登入</h2><p class="mu">請輸入管理員帳號與密碼。</p>
  <label>帳號</label><input id="lid" autocomplete="username" autocapitalize="off">
  <label>密碼</label><input id="lpw" type="password" autocomplete="current-password">
  <p><button class="b" data-a="login" style="width:100%">登入</button></p></div>`;
@@ -343,7 +343,7 @@ function pplView(){
  const del=(a,id)=>`<button class="b d sm" data-a="${a}" data-id="${esc(id)}">刪除</button>`;
  const staff=users.filter(u=>u.role!=='admin');
  const sel=(f,id,cur,arr,ph)=>`<select data-uf="${f}" data-uid="${esc(id)}" style="width:auto;padding:6px">${opts(arr.map(x=>[x.name,x.name]),cur,ph)}</select>`;
- return `<div class="card"><h2>場域</h2><div class="scan"><input data-k="sname" placeholder="新增場域名稱（例如 ○○分場）" value="${V('sname')}"><button class="b" data-a="addsite">新增</button></div>
+ return (st.eu?editUserCard():'')+`<div class="card"><h2>場域</h2><div class="scan"><input data-k="sname" placeholder="新增場域名稱（例如 ○○分場）" value="${V('sname')}"><button class="b" data-a="addsite">新增</button></div>
  ${sites.length?'':'<p><button class="b s" data-a="seedsites">加入預設場域（桃園本場、樹林分場、新埔分場、五峰分場）</button></p>'}
  ${sites.map(x=>`<div class="item" style="cursor:default"><b>${esc(x.name)}</b>${del('delsite',x.id)}</div>`).join('')}</div>
  ${depts.length?'':'<div class="card"><p class="mu">資料庫是空的？可一次匯入樹林分場的科室與人員（需先有「樹林分場」場域）。</p><button class="b s" data-a="seedstaff">匯入樹林分場科室與人員</button></div>'}
@@ -354,12 +354,24 @@ function pplView(){
  <div style="min-width:130px"><label>科室</label><select data-k="pdept">${opts(depts.map(d=>[d.name,d.name]),st.pdept,'— 選擇科室 —')}</select></div>
  <div style="min-width:130px"><label>場域</label><select data-k="psite">${opts(sites.map(x=>[x.name,x.name]),st.psite,'— 選擇場域 —')}</select></div></div>
  <p><button class="b" data-a="addperson">新增領用人</button></p>
- ${staff.map(u=>`<div class="item" style="cursor:default;flex-wrap:wrap"><b>${esc(u.name)}</b><span>${sel('dept',u.id,u.dept,depts,'未分科室')} ${sel('site',u.id,u.site,sites,'未設場域')}</span>${del('deluser',u.id)}</div>`).join('')}</div>
+ ${staff.map(u=>`<div class="item" style="cursor:default;flex-wrap:wrap"><b>${esc(u.name)}</b><span>${sel('dept',u.id,u.dept,depts,'未分科室')} ${sel('site',u.id,u.site,sites,'未設場域')}</span><span><button class="b s sm" data-a="edituser" data-id="${esc(u.id)}">編輯</button> ${del('deluser',u.id)}</span></div>`).join('')}</div>
  <div class="card"><h2>管理員帳號（登入入庫、後台）</h2><p class="mu">帳號相同即重設密碼。可指派給某位領用人，或直接填姓名。</p>
  <div class="row"><div><label>帳號</label><input data-k="aid" autocapitalize="off" value="${V('aid')}"></div><div><label>指派給</label><select data-k="apid">${opts(staff.map(u=>[u.id,u.name+(u.dept?'（'+u.dept+'）':'')]),st.apid,'— 不指派 —')}</select></div></div>
  <div class="row"><div><label>姓名（未指派時填）</label><input data-k="aname" value="${V('aname')}"></div><div><label>密碼（至少 4 碼）</label><input data-k="apw" value="${V('apw')}"></div></div>
  <p><button class="b" data-a="addadmin">儲存管理員</button></p>
- ${users.filter(u=>u.role==='admin').map(u=>`<div class="item" style="cursor:default"><div><b>${esc(u.name)}</b> <span class="tag">管理員</span>${u.pid?'<span class="tag">已指派</span>':''}<br><small>帳號 ${esc(u.id)}${u.dept?'｜'+esc(u.dept):''}${u.site?'｜'+esc(u.site):''}</small></div>${u.id===me?'<small>目前登入</small>':del('deluser',u.id)}</div>`).join('')}</div>`;
+ ${users.filter(u=>u.role==='admin').map(u=>`<div class="item" style="cursor:default"><div><b>${esc(u.name)}</b> <span class="tag">管理員</span>${u.pid?'<span class="tag">已指派</span>':''}<br><small>帳號 ${esc(u.id)}${u.dept?'｜'+esc(u.dept):''}${u.site?'｜'+esc(u.site):''}</small></div><span><button class="b s sm" data-a="edituser" data-id="${esc(u.id)}">編輯</button> ${u.id===me?'<small>目前登入</small>':del('deluser',u.id)}</span></div>`).join('')}</div>`;
+}
+function editUserCard(){
+ const u=users.find(x=>x.id===st.eu);if(!u)return '';
+ const isA=u.role==='admin',staff=users.filter(x=>x.role!=='admin');
+ return `<div class="card" style="border-top-color:var(--ac)"><h2>編輯${isA?'管理員':'領用人'}：${esc(u.name)}</h2>
+ ${isA?`<p class="mu">帳號：${esc(u.id)}（帳號不能修改，要換帳號請新增後再刪除舊的）</p>`:''}
+ <label>姓名</label><input data-k="en" value="${esc(st.en??u.name)}">
+ <div class="row" style="flex-wrap:wrap"><div style="min-width:130px"><label>科室</label><select data-k="ed">${opts(depts.map(d=>[d.name,d.name]),st.ed??u.dept,'— 未分科室 —')}</select></div>
+ <div style="min-width:130px"><label>場域</label><select data-k="es">${opts(sites.map(x=>[x.name,x.name]),st.es??u.site,'— 未設場域 —')}</select></div></div>
+ ${isA?`<label>指派給領用人（選了會帶入該人的姓名、科室、場域）</label><select data-k="ep">${opts(staff.map(x=>[x.id,x.name+(x.dept?'（'+x.dept+'）':'')]),st.ep??u.pid,'— 不指派 —')}</select>
+ <label>新密碼（不修改請留空，至少 4 碼）</label><input data-k="epw" value="${V('epw')}">`:''}
+ <p class="row"><button class="b" data-a="saveuser">儲存</button><button class="b s" data-a="canceluser">取消</button></p></div>`;
 }
 const logsF=()=>{const f=st.lfrom?new Date(st.lfrom+'T00:00:00').getTime():0,t=st.lto?new Date(st.lto+'T23:59:59').getTime():Infinity;return logs.filter(l=>(logf==='all'||l.type===logf)&&l.ts>=f&&l.ts<=t&&(!st.lsite||l.site===st.lsite)&&(!st.ldept||l.dept===st.ldept)&&(!st.lby||l.by===st.lby))};
 function logView(){
@@ -407,6 +419,21 @@ document.addEventListener('click',async e=>{
  else if(a==='variant'){const p=prods.find(x=>x.id===id);editing={cat:p.cat,use:p.use,name:p.name,conc:p.conc,loc:p.loc,unit:p.unit,qty:0};render()}
  else if(a==='bind'){const p=prods.find(x=>x.id===sel);if(prods.some(x=>x.barcode===lastCode))setMsg('此條碼已綁定其他商品',1);else{await db.collection('products').doc(p.id).update({barcode:lastCode});setMsg('已綁定條碼 '+lastCode)}}
  else if(a==='seed')importSeed();
+ else if(a==='edituser'){st={eu:id};render();window.scrollTo({top:0,behavior:'smooth'})}
+ else if(a==='canceluser'){st={};render()}
+ else if(a==='saveuser'){
+  const u=users.find(x=>x.id===st.eu);if(!u)return;
+  const isA=u.role==='admin',d={name:(st.en??u.name).trim(),dept:st.ed??u.dept??'',site:st.es??u.site??''};
+  if(!d.name)return setMsg('姓名不能空白',1);
+  if(isA&&st.epw&&st.epw.length<4)return setMsg('新密碼至少 4 碼',1);
+  const epw=st.epw,ep=st.ep;
+  run(async()=>{
+   if(isA&&ep!==undefined){d.pid=ep;const per=users.find(x=>x.id===ep&&x.role!=='admin');if(per){d.name=per.name;d.dept=per.dept||'';d.site=per.site||''}}
+   if(isA&&epw)d.pw=await hash(epw);
+   await db.collection('users').doc(u.id).update(d);
+   if(!isA)for(const a2 of users.filter(x=>x.pid===u.id))await db.collection('users').doc(a2.id).update({name:d.name,dept:d.dept,site:d.site});
+  },'已更新：'+d.name);
+ }
  else if(a==='adddept'){if(need(st.dname,'請輸入科室名稱'))run(()=>db.collection('depts').add({name:st.dname.trim(),ord:Date.now()}),'已新增科室')}
  else if(a==='addsite'){if(need(st.sname,'請輸入場域名稱'))run(()=>db.collection('sites').add({name:st.sname.trim(),ord:Date.now()}),'已新增場域')}
  else if(a==='delsite')two('再按確認',()=>db.collection('sites').doc(id).delete());
