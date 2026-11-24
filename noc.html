@@ -150,15 +150,15 @@ function render(){
  <div class="kpi"><span>領用次數（張）</span><b>${batches.toLocaleString()}</b></div>
  <div class="kpi"><span>庫存淨值（以最近單價估）</span><b>${money(invVal)}</b></div>
  <div class="kpi ${lowN?'r':''}"><span>庫存偏低品項</span><b>${lowN}</b></div></div>
- ${noPrice?`<p class="mu">※ 本期有 ${noPrice} 筆領用沒有單價（該商品尚未在入庫時填寫單價），金額以 0 計。</p>`:''}
+ ${noPrice?`<p class="mu">※ 本期有 ${noPrice} 筆領用沒有單價（該資材尚未在入庫時填寫單價），金額以 0 計。</p>`:''}
  <div class="card"><h2>各場域比較（${PN[period]}）</h2><div class="wrap"><table><tr><th>場域</th><th>領用次數</th><th>領用金額</th><th style="min-width:160px"></th><th>入庫金額</th><th>庫存淨值</th><th>偏低品項</th></tr>
  ${rowsSite.map(r=>`<tr><td><b>${esc(r.n)}</b></td><td>${r.cnt}</td><td>${money(r.ao)}</td><td><div class="hb" style="width:${Math.max(r.ao/mx*100,1)}%"></div></td><td>${money(r.ai)}</td><td>${money(r.inv)}</td><td class="${r.low?'low':''}">${r.low}</td></tr>`).join('')||'<tr><td colspan="7" class="mu">尚無場域</td></tr>'}
  <tr><td><b>全單位</b></td><td>${rowsSite.reduce((s,r)=>s+r.cnt,0)}</td><td><b>${money(rowsSite.reduce((s,r)=>s+r.ao,0))}</b></td><td></td><td><b>${money(rowsSite.reduce((s,r)=>s+r.ai,0))}</b></td><td>${money(rowsSite.reduce((s,r)=>s+r.inv,0))}</td><td>${rowsSite.reduce((s,r)=>s+r.low,0)}</td></tr></table></div></div>
  <div class="card"><h2>${byDay?'每日':'每月'}領用金額趨勢${siteF?'（'+esc(siteF)+'）':'（全單位）'}</h2>${bars(trend)}</div>
  <div class="grid2"><div class="card"><h2>依分類領用金額</h2>${bars(grp(out,l=>l.cat,l=>l.amt))}</div>
  <div class="card"><h2>依科室領用金額</h2>${bars(grp(out,l=>siteF?l.dept:(l.site||'')+' '+(l.dept||''),l=>l.amt).slice(0,12))}</div></div>
- <div class="card"><h2>領用金額 TOP 10 商品</h2>${bars(topI)}</div>
- <p class="mu" style="text-align:center">資料即時更新。領用金額＝領用數量 × 該商品最近一次入庫單價。</p></main>`;
+ <div class="card"><h2>領用金額 TOP 10 資材</h2>${bars(topI)}</div>
+ <p class="mu" style="text-align:center">資料即時更新。領用金額＝領用數量 × 該資材最近一次入庫單價。</p></main>`;
  app.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{period=b.dataset.p;listen();render()});
  app.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{siteF=b.dataset.s;render()});
  const fs=$('#fs'),ts=$('#ts');if(fs)fs.onchange=()=>{fromS=fs.value;listen()};if(ts)ts.onchange=()=>{toS=ts.value;listen()};
