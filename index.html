@@ -9,7 +9,7 @@
 <meta charset="utf-8">
 <meta name="robots" content="noindex">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>農藥肥料領用入庫系統</title>
+<title>農藥肥料領用入庫系統－後台</title>
 <style>
 :root{box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
 --bg:#f6f2e6;--card:#fffdf7;--tx:#2a2a1f;--hd:#5a4326;--mu:#6f6b58;--bd:#e2dac3;--pr:#2d6a2f;--prt:#fff;--ac:#f0a313;--acl:#fdf1d3;--dg:#b83a2a;--ok:#e5f0dc}
@@ -292,6 +292,7 @@ function cartForm(){
  const rows=cart.map((c,i)=>{const p=prods.find(x=>x.id===c.pid);return p?`<div class="item" style="cursor:default"><div><b>${esc(ttl(p))}</b><br><small>📍${esc(locOf(p)||'未設位置')}｜庫存 ${p.qty||0}</small></div><div>${c.qty} ${esc(p.unit||'')} <button class="b d sm" data-a="rmcart" data-id="${i}">移除</button></div></div>`:''}).join('');
  return `<div class="card"><h2>③ 領用清單（${cart.length} 項）</h2>${rows||'<p class="mu">尚未加入資材，請先搜尋資材並加入清單。</p>'}
  <h2 style="margin-top:18px">④ 領用資訊</h2><label style="margin-top:0">使用地點或作物</label><input data-k="place" list="pl" value="${V('place')}" placeholder="手動填寫"><datalist id="pl">${places.map(x=>`<option>${esc(x)}</option>`).join('')}</datalist>
+ <label>代領人（本人親領請留空；委託他人代領時填寫姓名，統計仍算在領用人身上）</label><input data-k="agent" value="${V('agent')}">
  <div class="row"><div><label>選擇科室</label><select data-k="dept">${opts(DS().map(d=>[d.name,d.name]),st.dept,'— 選擇科室 —')}</select></div>
  <div><label>領用人員</label><select data-k="person">${opts(staff.map(u=>[u.id,u.name]),st.person,st.dept?'— 選擇人員 —':'請先選科室')}</select></div></div>
  <p><button class="b" data-a="submitOut" style="width:100%">領用</button></p></div>`;
@@ -324,7 +325,7 @@ async function submitOut(){
   for(const {p,n} of items){
    const pr=Number(p.lastPrice)||0;
    await db.collection('products').doc(p.id).update({qty:Math.round(((p.qty||0)-n)*1000)/1000});
-   await db.collection('logs').add({type:'out',batch,pid:p.id,name:ttl(p),cat:p.cat||'',unit:p.unit||'',floor:locOf(p),qty:n,note:'',place,dept:u.dept||'',site:fsite,vendor:'',price:p.lastPrice??'',amt:Math.round(n*pr*100)/100,by:u.name,ts});
+   await db.collection('logs').add({type:'out',batch,pid:p.id,name:ttl(p),cat:p.cat||'',unit:p.unit||'',floor:locOf(p),qty:n,note:'',place,dept:u.dept||'',site:fsite,vendor:'',price:p.lastPrice??'',amt:Math.round(n*pr*100)/100,agent:(st.agent||'').trim(),by:u.name,ts});
   }
   done={low:items.filter(({p,n})=>thr(p)>0&&(p.qty||0)-n<=thr(p)).map(({p,n})=>({t:ttl(p),q:(p.qty||0)-n,u:p.unit||''})),items:items.map(({p,n})=>({name:p.name,spec:p.spec||'',unit:p.unit||'',loc:locOf(p),n})),by:u.name,dept:u.dept||'',site:fsite,place,ts};
   cart=[];st={};sel=null;q='';render();
@@ -611,12 +612,71 @@ function editUserCard(){
  ${isA?`<p><button class="b s" data-a="mkcode" data-id="${esc(u.id)}">產生新的復原碼（只顯示一次）</button></p>`:''}<p class="row"><button class="b" data-a="saveuser">儲存</button><button class="b s" data-a="canceluser">取消</button></p></div>`;
 }
 const logsF=()=>{const f=st.lfrom?new Date(st.lfrom+'T00:00:00').getTime():0,t=st.lto?new Date(st.lto+'T23:59:59').getTime():Infinity;const lim=isSuper()?(st.lsite||''):scopeOf();return logs.filter(l=>(!lim||l.site===lim)&&(logf==='all'||l.type===logf||(logf==='xfer'&&(l.type==='tout'||l.type==='tin')))&&l.ts>=f&&l.ts<=t&&(!st.ldept||l.dept===st.ldept)&&(!st.lby||l.by===st.lby))};
+function batchList(type){
+ const seen=new Set(),out=[];
+ for(const l of logsF()){if(l.type!==type||!l.batch||seen.has(l.batch))continue;seen.add(l.batch);out.push(l)}
+ return out.slice(0,20);
+}
+function printSlip(kind,batch){
+ const type=kind==='req'?'out':'tout';
+ const rows=logs.filter(l=>l.batch===batch&&l.type===type);
+ if(!rows.length)return setMsg('找不到這張單據的明細',1);
+ const r0=rows[0],title=kind==='req'?'資材領用單':'資材調撥單';
+ const w=window.open('','_blank');
+ if(!w)return setMsg('瀏覽器擋住了列印視窗，請允許彈出視窗後再試一次',1);
+ const tr=rows.map((l,i)=>`<tr><td>${i+1}</td><td>${esc(l.name)}</td><td>${esc(l.unit)}</td><td>${l.qty}</td><td>${esc(l.note||'')}</td></tr>`).join('');
+ let meta,sign;
+ if(kind==='req'){
+  meta=`<tr><th>單據編號</th><td>${esc(batch)}</td><th>日期</th><td>${fmt(r0.ts)}</td></tr>
+   <tr><th>場域</th><td>${esc(r0.site)}</td><th>科室</th><td>${esc(r0.dept)}</td></tr>
+   <tr><th>領用人</th><td>${esc(r0.by)}</td><th>代領人</th><td>${esc(r0.agent)||'（本人親領）'}</td></tr>
+   <tr><th>使用地點／作物</th><td colspan="3">${esc(r0.place)}</td></tr>`;
+  sign=`<div class="sg"><div>領用人簽章</div><div class="box"></div></div>
+   ${r0.agent?'<div class="sg"><div>代領人簽章</div><div class="box"></div></div>':''}
+   <div class="sg"><div>資材管理人簽章</div><div class="box"></div></div>
+   <div class="sg"><div>單位主管簽章</div><div class="box"></div></div>`;
+ }else{
+  const dst=logs.find(l=>l.batch===batch&&l.type==='tin');
+  meta=`<tr><th>單據編號</th><td>${esc(batch)}</td><th>日期</th><td>${fmt(r0.ts)}</td></tr>
+   <tr><th>調出場域</th><td>${esc(r0.site)}</td><th>調入場域</th><td>${esc(dst?dst.site:'')}</td></tr>
+   <tr><th>經辦人</th><td colspan="3">${esc(r0.by)}</td></tr>`;
+  sign=`<div class="sg"><div>調出場域確認人簽章</div><div class="box"></div></div>
+   <div class="sg"><div>調入場域簽收人簽章</div><div class="box"></div></div>
+   <div class="sg"><div>總務主管核章</div><div class="box"></div></div>`;
+ }
+ w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title} ${esc(batch)}</title><style>
+  body{font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif;padding:24px;color:#222}
+  h1{text-align:center;font-size:22px;margin:0 0 4px}
+  .org{text-align:center;color:#555;margin-bottom:18px;font-size:14px}
+  table.meta,table.items{width:100%;border-collapse:collapse;margin-bottom:14px}
+  table.meta th,table.meta td{border:1px solid #999;padding:6px 8px;font-size:14px;text-align:left}
+  table.meta th{background:#f0ead9;width:110px}
+  table.items th,table.items td{border:1px solid #999;padding:6px 8px;font-size:14px;text-align:center}
+  table.items th{background:#eef2e4}
+  .sign{display:flex;gap:16px;margin-top:40px;flex-wrap:wrap}
+  .sg{flex:1;min-width:140px;text-align:center;font-size:13px}
+  .sg .box{border:1px solid #999;height:70px;margin-top:6px}
+  .ft{margin-top:30px;font-size:12px;color:#888;text-align:right}
+  @media print{.noprint{display:none}}
+  </style></head><body>
+  <div class="noprint" style="text-align:right;margin-bottom:10px"><button onclick="window.print()">列印</button> <button onclick="window.close()">關閉</button></div>
+  <h1>${title}</h1><div class="org">農業部桃園區農業改良場</div>
+  <table class="meta">${meta}</table>
+  <table class="items"><tr><th>序號</th><th>品名</th><th>單位</th><th>數量</th><th>備註</th></tr>${tr}</table>
+  <div class="sign">${sign}</div>
+  <div class="ft">列印時間：${new Date().toLocaleString('zh-TW',{hour12:false})}</div>
+  </body></html>`);
+ w.document.close();
+}
 function logView(){
  const ls=logsF(),sup=isSuper(),sc=scopeOf(),uq=a=>[...new Set(a.filter(Boolean))],o=a=>a.map(x=>[x,x]);
  const base=logs.filter(l=>sup||l.site===sc);
  const sl=(k,lb,a)=>`<div style="min-width:130px"><label>${lb}</label><select data-k="${k}">${opts(o(a),st[k],'全部')}</select></div>`;
  const nOut=ls.filter(l=>l.type==='out').length,amtOut=ls.filter(l=>l.type==='out').reduce((s,l)=>s+(Number(l.amt)||0),0),amtIn=ls.filter(l=>l.type==='in').reduce((s,l)=>s+(Number(l.amt)||0),0);
- return `<div class="card"><h2>領用／入庫紀錄${sup?'':'（'+esc(sc)+'）'}</h2><div class="row" style="margin-bottom:8px">
+ return `<div class="card"><h2>領用／入庫紀錄${sup?'':'（'+esc(sc)+'）'}</h2>
+ <div class="card"><h2>可列印的領用單（${batchList('out').length}）</h2>${batchList('out').map(l=>`<div class="item" style="cursor:default"><div><b>${esc(l.batch)}</b>｜${fmt(l.ts)}<br><small>${esc(l.site)} ${esc(l.dept)}｜領用人：${esc(l.by)}${l.agent?'｜代領：'+esc(l.agent):''}｜${esc(l.place)}</small></div><button class="b s sm" data-a="printreq" data-id="${esc(l.batch)}">列印領用單</button></div>`).join('')||'<p class="mu">此區間尚無領用單</p>'}</div>
+ <div class="card"><h2>可列印的調撥單（${batchList('tout').length}）</h2>${batchList('tout').map(l=>{const dst=logs.find(x=>x.batch===l.batch&&x.type==='tin');return `<div class="item" style="cursor:default"><div><b>${esc(l.batch)}</b>｜${fmt(l.ts)}<br><small>${esc(l.site)} → ${esc(dst?dst.site:'')}｜經辦：${esc(l.by)}</small></div><button class="b s sm" data-a="printxfer" data-id="${esc(l.batch)}">列印調撥單</button></div>`}).join('')||'<p class="mu">此區間尚無調撥單</p>'}</div>
+ <div class="row" style="margin-bottom:8px">
  ${[['all','全部'],['out','領用'],['in','入庫'],['xfer','調撥']].map(a=>`<button class="b ${logf===a[0]?'':'s'} sm" data-a="logf" data-id="${a[0]}">${a[1]}</button>`).join('')}</div>
  <div class="row" style="flex-wrap:wrap">${sup?sl('lsite','場域',uq(sites.map(x=>x.name).concat(base.map(l=>l.site)))):''}${sl('ldept','科室',uq(base.map(l=>l.dept)))}${sl('lby','人員（領用／入庫）',uq(base.map(l=>l.by)))}</div>
  <div class="row"><div><label>起始日期</label><input type="date" data-k="lfrom" value="${V('lfrom')}"></div><div><label>結束日期</label><input type="date" data-k="lto" value="${V('lto')}"></div></div>
@@ -790,6 +850,8 @@ document.addEventListener('click',async e=>{
  else if(a==='fsite'){fsite=id;try{localStorage.setItem('fs_site',id)}catch(x){}cart=[];sel=null;q='';st={};render()}
  else if(a==='savecfg')run(()=>db.doc('settings/main').set({minDefault:parseFloat(st.cmin??cfg().minDefault)||0}),'已儲存');
  else if(a==='logf'){logf=id;render()}
+ else if(a==='printreq')printSlip('req',id);
+ else if(a==='printxfer')printSlip('xfer',id);
  else if(a==='lowOk'||a==='lowView'){prods.filter(isLow).forEach(p=>ack.add(p.id+':'+(p.qty||0)));if(a==='lowView'){tab='adm';sub='prod';q='';editing=null}render()}
  else if(a==='showlow'){ack.clear();render()}
  else if(a==='expLogs'){saveCsv('stock-log-'+today()+'.csv',[['時間','類別','資材','數量','單位','單價','倉庫位置','使用地點或作物','場域','科室','人員','廠商','廠商聯絡','金額','備註'],...logsF().map(l=>[new Date(l.ts).toLocaleString('zh-TW',{hour12:false}),TL[l.type]||l.type,l.name,l.qty,l.unit,l.price,l.floor,l.place,l.site,l.dept,l.by,l.vendor,l.vcontact,l.amt,l.note])])}
