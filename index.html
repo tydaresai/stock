@@ -52,6 +52,11 @@ th{background:var(--ok);color:var(--hd)}
 .side button.on{background:rgba(255,255,255,.22);opacity:1;font-weight:700;box-shadow:inset 4px 0 0 var(--ac)}
 .side a.sidelink{color:#fff;padding:11px 12px;text-decoration:none;opacity:.9;border-top:1px solid rgba(255,255,255,.3);margin-top:4px;display:block;font-size:16px}
 @media (max-width:700px){.adm{display:block}.side{position:static;flex-direction:row;overflow-x:auto;margin-bottom:12px}.side button{white-space:nowrap}}
+.card.cl>h2:first-child{cursor:pointer;user-select:none;display:flex;justify-content:space-between;align-items:center}
+.card.cl>h2:first-child::after{content:'▾';font-size:14px;color:var(--mu);margin-left:8px}
+.card.cl.closed>h2:first-child::after{content:'▸'}
+.card.cl.closed>*:not(h2:first-child){display:none}
+.card.cl.closed>h2:first-child{margin-bottom:0}
 input[readonly]{opacity:.75}
 .big{font-size:20px}.big h2{font-size:24px}.big label{font-size:17px;margin-top:12px}.big .mu,.big .item small{font-size:17px}
 .big .item{padding:14px;font-size:20px}.big .item b{font-size:24px;line-height:1.35}
@@ -63,6 +68,7 @@ input[readonly]{opacity:.75}
 <div id="app"><main><p class="mu">載入中…</p></main></div>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script>
 /* ===== 只需要改這裡：貼上你在 Firebase 取得的設定（見建置教學） ===== */
 const FIREBASE_CONFIG={
@@ -106,6 +112,25 @@ const VS=()=>vendors.filter(v=>v.site===aSite());
 function scope_(){prods=(tab!=='out'&&ALL())?allProds.slice():allProds.filter(p=>p.site===curSite())}
 const cfg=()=>cfgs.find(c=>c.id==='main')||{};
 const fmt=t=>new Date(t).toLocaleString('zh-TW',{hour12:false,month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+let limP=30,limL=50,colState={};
+try{colState=JSON.parse(localStorage.getItem('fs_col')||'{}')}catch(e){}
+function saveCol(){try{localStorage.setItem('fs_col',JSON.stringify(colState))}catch(e){}}
+function enhance(){
+ if(tab!=='adm'||!isAdmin())return;
+ const sec=document.querySelector('section');if(!sec)return;
+ const def=['ppl','loc','cat'].includes(sub);
+ sec.querySelectorAll(':scope > .card').forEach(c=>{
+  const h=c.firstElementChild;if(!h||h.tagName!=='H2'||/^編輯/.test(h.textContent))return;
+  const k=sub+'|'+h.textContent.replace(/（[^）]*）/g,'').trim();
+  c.classList.add('cl');c.dataset.ck=k;
+  c.classList.toggle('closed',colState[k]===undefined?def:!!colState[k]);
+ });
+}
+function setAllCols(v){const sec=document.querySelector('section');if(!sec)return;sec.querySelectorAll(':scope > .card.cl').forEach(c=>{c.classList.toggle('closed',v);colState[c.dataset.ck]=v});saveCol()}
+document.addEventListener('click',e=>{
+ const h=e.target.closest('.card.cl>h2:first-child');if(!h||e.target.closest('button,a,input,select'))return;
+ const c=h.parentElement;c.classList.toggle('closed');colState[c.dataset.ck]=c.classList.contains('closed');saveCol();
+});
 const fmtD=t=>new Date(t).toLocaleDateString('zh-TW');
 const wt=p=>p.spec||'';
 const ttl=p=>p.name+(p.spec?'（'+p.spec+'）':'');
@@ -167,7 +192,7 @@ function render(){
  document.body.className=tab==='out'?'front':'back';
  $('#app').innerHTML=`<div class="brand"><img src="${LOGO}" alt="農業部桃園區農業改良場"><div class="acts">${tab==='out'?`<a href="admin.html">${adm?'後台':'後台登入'}</a>`:`${adm?'<span>'+esc(cu().name)+'</span>':''}<div><a href="index.html">回前台</a>${adm?'<a href="#" data-a="logout">登出</a>':''}</div>`}</div></div><div class="bar">農藥肥料領用入庫系統</div>
  <main class="${tab==='out'?'big':'back'}">${msg?`<div class="msg ${msg.e?'e':''}">${esc(msg.t)}</div>`:''}${gate?loginView():tab==='adm'?admView():pickView()}</main>`;
- msg=null;renderList();
+ msg=null;renderList();enhance();
  if(adm){const lw=prods.filter(p=>isLow(p)&&!ack.has(p.id+':'+(p.qty||0)));
   if(lw.length)$('#app').insertAdjacentHTML('beforeend',`<div style="position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px;z-index:50"><div class="card" style="max-width:520px;width:100%;max-height:80vh;overflow:auto;margin:0"><h2>⚠ 庫存偏低通知（${lw.length} 項）</h2>${lw.map(p=>`<div class="item" style="cursor:default"><div><b>${esc(ttl(p))}</b><br><small>${esc(p.site||'')}｜📍${esc(locOf(p)||'未設位置')}｜安全庫存 ${thr(p)}</small></div><div class="low">${p.qty||0} ${esc(p.unit||'')}</div></div>`).join('')}<p class="row"><button class="b" data-a="lowOk">知道了</button><button class="b s" data-a="lowView">到資材頁查看</button></p></div></div>`)}
  const qi=$('#q');if(qi&&!sel&&editing===null)qi.focus();
@@ -272,9 +297,9 @@ async function submitOut(){
  }catch(e){setMsg('領用失敗：'+(e.message||e)+'（部分資材可能已扣庫存，請至後台紀錄核對）',1)}
 }
 function match(t){
- t=t.trim().toLowerCase();if(!t)return prods.slice(0,inProd()?400:8);
- const ks=t.split(/\s+/);
- return prods.filter(p=>{const h=[p.name,p.barcode,p.loc,p.floor,p.note,p.cat,p.use,p.conc,p.spec].join(' ').toLowerCase();return ks.every(k=>h.includes(k))}).slice(0,inProd()?400:30);
+ t=t.trim().toLowerCase();const lim=inProd()?limP:(t?30:8);let a;
+ if(!t)a=prods;else{const ks=t.split(/\s+/);a=prods.filter(p=>{const h=[p.name,p.barcode,p.loc,p.floor,p.note,p.cat,p.use,p.conc,p.spec].join(' ').toLowerCase();return ks.every(k=>h.includes(k))})}
+ window._tot=a.length;return a.slice(0,lim);
 }
 function renderList(){
  const r=$('#res');if(!r)return;
@@ -283,6 +308,7 @@ function renderList(){
  r.innerHTML=rs.map(p=>`<div class="item" data-a="pick" data-id="${p.id}"><div><b>${esc(ttl(p))}</b><br><small>${tab!=='out'&&ALL()?'<span class="tag">'+esc(p.site||'')+'</span> ':''}📍${esc(locOf(p)||'未設位置')}｜${esc(p.cat||'')} ${esc(p.conc||'')}${p.n!=null&&p.n!==''?` ｜N-P-K ${esc(p.n)}-${esc(p.p)}-${esc(p.k)}`:''}${p.barcode?'':' ｜<span class="low">未綁條碼</span>'}</small></div><div class="${isLow(p)?'low':''}">${p.qty||0} ${esc(p.unit||'')}</div></div>`).join('')
  ||`<p class="mu">找不到資材${mode()==='out'?'，請聯絡管理員建檔。':'。可按下方新增：'}</p>`;
  if(mode()!=='out'&&!rs.length&&q.trim())r.innerHTML+=`<p><button class="b" data-a="newprod">新增資材「${esc(q.trim())}」</button></p>`;
+ if(inProd()&&window._tot>limP)r.innerHTML+=`<p><button class="b s" data-a="morep">顯示更多（還有 ${window._tot-limP} 項）</button></p>`;
  if(tab!=='out'&&aSite()&&q.trim()){
   const ks=q.trim().toLowerCase().split(/\s+/);
   const oth=allProds.filter(x=>x.site!==aSite()&&!prods.some(m=>(m.barcode&&m.barcode===x.barcode)||(m.name===x.name&&(m.spec||'')===(x.spec||'')))&&ks.every(k=>[x.name,x.barcode,x.spec,x.cat,x.conc].join(' ').toLowerCase().includes(k))).slice(0,6);
@@ -298,11 +324,57 @@ function scanCode(code){
  if(ex){if(inProd())editing=ex;else pickProd(ex.id);q=''}
  render();document.querySelector('[data-k=qty]')?.focus();
 }
+let bd=null,zxr=null,camTimer=null,camStream=null;
+try{if('BarcodeDetector' in window)bd=new BarcodeDetector()}catch(e){}
+function zxDecode(c){
+ if(!window.ZXing)return null;
+ if(!zxr){const h=new Map(),F=ZXing.BarcodeFormat;h.set(ZXing.DecodeHintType.POSSIBLE_FORMATS,[F.EAN_13,F.EAN_8,F.UPC_A,F.UPC_E,F.CODE_128,F.CODE_39,F.ITF,F.CODABAR,F.QR_CODE,F.DATA_MATRIX]);h.set(ZXing.DecodeHintType.TRY_HARDER,true);zxr=new ZXing.MultiFormatReader();zxr.setHints(h)}
+ const lum=new ZXing.HTMLCanvasElementLuminanceSource(c);
+ for(const B of [ZXing.HybridBinarizer,ZXing.GlobalHistogramBinarizer]){try{return zxr.decode(new ZXing.BinaryBitmap(new B(lum))).getText()}catch(e){}}
+ return null;
+}
+async function decodeCanvas(c){
+ if(bd){try{const r=await bd.detect(c);if(r.length)return r[0].rawValue}catch(e){}}
+ return zxDecode(c);
+}
+function rotCanvas(c){const o=document.createElement('canvas');o.width=c.height;o.height=c.width;const g=o.getContext('2d');g.translate(c.height,0);g.rotate(Math.PI/2);g.drawImage(c,0,0);return o}
+function fileToImg(f){return new Promise((res,rej)=>{const u=URL.createObjectURL(f),i=new Image();i.onload=()=>{res(i)};i.onerror=()=>rej(new Error('圖片格式無法讀取'));i.src=u})}
+async function decodeFile(f){
+ const img=await fileToImg(f),W=img.naturalWidth,H=img.naturalHeight;
+ for(const max of [1280,1920,800,2400]){
+  const sc=max/Math.max(W,H),w=Math.round(W*sc),h=Math.round(H*sc),c=document.createElement('canvas');
+  c.width=w;c.height=h;const g=c.getContext('2d');g.imageSmoothingQuality='high';g.drawImage(img,0,0,w,h);
+  let code=await decodeCanvas(c);if(code)return code;
+  code=await decodeCanvas(rotCanvas(c));if(code)return code;
+ }
+ return null;
+}
 async function readPhoto(f,cb){
- if(!('BarcodeDetector' in window))return setMsg('此瀏覽器不支援拍照辨識條碼，請改用掃碼槍或手動輸入。',1);
- try{const r=await new BarcodeDetector().detect(await createImageBitmap(f));
-  if(!r.length)return setMsg('未辨識到條碼，請靠近一點、對焦後重拍。',1);cb(r[0].rawValue)}
- catch(e){setMsg('條碼辨識失敗：'+e.message,1)}
+ try{const code=await decodeFile(f);
+  if(!code)return setMsg('未辨識到條碼。請靠近一點、對焦清楚、條碼橫放且完整入鏡、避免反光，或改按 📷 用相機即時掃描。',1);
+  cb(code)}
+ catch(e){setMsg('無法讀取這張圖片（iPhone 的 HEIC 格式可能不支援，請改用相機即時掃描）：'+(e.message||''),1)}
+}
+async function openCam(cb,fileSel){
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){const f=document.querySelector(fileSel);f&&f.click();return}
+ const ov=document.createElement('div');ov.style.cssText='position:fixed;inset:0;background:#000;z-index:100;display:flex;flex-direction:column';
+ ov.innerHTML='<div style="position:relative;flex:1;min-height:0"><video id="camv" playsinline muted style="width:100%;height:100%;object-fit:cover"></video><div style="position:absolute;left:8%;right:8%;top:38%;height:24%;border:3px solid #f0a313;border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35)"></div><div style="position:absolute;top:12px;left:0;right:0;text-align:center;color:#fff;text-shadow:0 0 4px #000;font-size:16px">把條碼放進黃色框內，保持穩定、光線充足</div></div><div style="padding:12px;display:flex;gap:8px;background:#111"><button class="b s" id="camfile" style="flex:1">改用拍照／選圖片</button><button class="b" id="camx" style="flex:1">關閉</button></div>';
+ document.body.appendChild(ov);
+ let n=0,busy=false;
+ const stop=()=>{clearInterval(camTimer);camTimer=null;if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null}ov.remove()};
+ document.getElementById('camx').onclick=stop;
+ document.getElementById('camfile').onclick=()=>{stop();const f=document.querySelector(fileSel);f&&f.click()};
+ try{camStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false})}
+ catch(e){stop();setMsg('無法開啟相機：請允許相機權限，並使用 https 網址開啟。也可以改用「拍照／選圖片」。',1);return}
+ const v=document.getElementById('camv');v.srcObject=camStream;try{await v.play()}catch(e){}
+ const c=document.createElement('canvas');
+ camTimer=setInterval(async()=>{
+  if(busy||!v.videoWidth)return;busy=true;
+  try{c.width=v.videoWidth;c.height=v.videoHeight;c.getContext('2d').drawImage(v,0,0);
+   let code=await decodeCanvas(c);if(!code&&(n++%2))code=await decodeCanvas(rotCanvas(c));
+   if(code){stop();cb(code)}}catch(e){}
+  busy=false;
+ },350);
 }
 async function logAdd(type,p,qty,note){
  await db.collection('logs').add({type,pid:p.id,name:ttl(p),unit:p.unit||'',floor:locOf(p),qty,note:note||'',place:'',dept:'',site:p.site||aSite(),cat:p.cat||'',amt:0,price:'',by:cu()?.name||'',ts:Date.now()});
@@ -335,7 +407,7 @@ function admView(){
  const warn=users.some(u=>u.role==='admin'&&u.pw===defpw)?'<div class="msg e">目前仍使用預設 admin 密碼，請到「人員與科室」另設管理員帳號密碼。</div>':'';
  const who=sup?`<div class="row" style="align-items:center"><div style="flex:none"><b>${LV[lvl()]}｜管理場域</b></div><div><select data-k="asite"><option value="" ${!site?'selected':''}>全部場域</option>${sites.map(x=>`<option ${x.name===site?'selected':''}>${esc(x.name)}</option>`).join('')}</select></div></div>${site?'':'<p class="mu">目前檢視全部場域：資材、人員、紀錄都會列出所有場域，可直接編輯；要匯入資材目錄請先選單一場域。</p>'}${sites.length?'':'<p class="mu">尚無場域，請先到「人員與科室」加入場域。</p>'}`:`<b>${LV[lvl()]}｜管理場域：${esc(site)}</b>`;
  const low=prods.filter(isLow).length;
- return warn+`<div class="msg" style="background:var(--card);border:1px solid var(--bd)">${who}</div>`+(low?`<div class="msg e">⚠ ${low} 項庫存低於安全量　<button class="b s sm" data-a="showlow">檢視</button></div>`:'')+`<div class="adm"><aside class="side">${t.map(a=>`<button data-a="sub" data-id="${a[0]}" class="${sub===a[0]?'on':''}">${a[1]}</button>`).join('')}${sup?'<a class="sidelink" href="noc.html" target="_blank">NOC 看板 ↗</a>':''}</aside><section>`+(sub==='in'?pickView():sub==='prod'?prodView():sub==='loc'?wareView():sub==='cat'?catView():sub==='xfer'?xferView():sub==='ppl'?pplView():sub==='log'?logView():cfgView())+`</section></div>`;
+ return warn+`<div class="msg" style="background:var(--card);border:1px solid var(--bd)">${who}</div>`+(low?`<div class="msg e">⚠ ${low} 項庫存低於安全量　<button class="b s sm" data-a="showlow">檢視</button></div>`:'')+`<div class="adm"><aside class="side">${t.map(a=>`<button data-a="sub" data-id="${a[0]}" class="${sub===a[0]?'on':''}">${a[1]}</button>`).join('')}${sup?'<a class="sidelink" href="noc.html" target="_blank">NOC 看板 ↗</a>':''}</aside><section>`+(['ppl','loc','cat','prod','log','xfer'].includes(sub)?'<p style="display:flex;gap:6px;justify-content:flex-end;margin:0 0 8px"><button class="b s sm" data-a="expall">全部展開</button><button class="b s sm" data-a="colall">全部收合</button></p>':'')+(sub==='in'?pickView():sub==='prod'?prodView():sub==='loc'?wareView():sub==='cat'?catView():sub==='xfer'?xferView():sub==='ppl'?pplView():sub==='log'?logView():cfgView())+`</section></div>`;
 }
 function prodView(){
  return `<div class="card"><h2>資材與倉庫位置（${prods.length}）</h2>
@@ -515,9 +587,9 @@ function logView(){
  <div class="row" style="flex-wrap:wrap">${sup?sl('lsite','場域',uq(sites.map(x=>x.name).concat(base.map(l=>l.site)))):''}${sl('ldept','科室',uq(base.map(l=>l.dept)))}${sl('lby','人員（領用／入庫）',uq(base.map(l=>l.by)))}</div>
  <div class="row"><div><label>起始日期</label><input type="date" data-k="lfrom" value="${V('lfrom')}"></div><div><label>結束日期</label><input type="date" data-k="lto" value="${V('lto')}"></div></div>
  <p><button class="b" data-a="expLogs">匯出紀錄（CSV，可用 Excel 開啟）</button></p>
- <p class="mu">符合條件 ${ls.length} 筆（領用 ${nOut} 筆、入庫 ${ls.filter(l=>l.type==='in').length} 筆、調撥 ${ls.filter(l=>l.type==='tout'||l.type==='tin').length} 筆；最多載入最近 1000 筆）｜領用金額 ${Math.round(amtOut).toLocaleString()} 元｜入庫金額 ${Math.round(amtIn).toLocaleString()} 元${ls.length>300?'；畫面只顯示前 300 筆，匯出為全部。':''}</p>
+ <p class="mu">符合條件 ${ls.length} 筆（領用 ${nOut} 筆、入庫 ${ls.filter(l=>l.type==='in').length} 筆、調撥 ${ls.filter(l=>l.type==='tout'||l.type==='tin').length} 筆；最多載入最近 1000 筆）｜領用金額 ${Math.round(amtOut).toLocaleString()} 元｜入庫金額 ${Math.round(amtIn).toLocaleString()} 元${ls.length>limL?'；畫面只顯示前 '+limL+' 筆，匯出為全部。':''}</p>
  <div class="wrap"><table><tr><th>時間</th><th>類別</th><th>資材</th><th>數量</th><th>單價</th><th>金額</th><th>位置</th><th>使用地點／作物</th><th>廠商</th><th>廠商聯絡</th><th>場域</th><th>科室</th><th>人員</th><th>備註</th></tr>
- ${ls.slice(0,300).map(l=>`<tr><td>${fmt(l.ts)}</td><td>${TL[l.type]||l.type}</td><td>${esc(l.name)}</td><td>${l.qty} ${esc(l.unit)}</td><td>${esc(l.price)}</td><td>${l.amt?Math.round(l.amt):''}</td><td>${esc(l.floor)}</td><td>${esc(l.place)}</td><td>${esc(l.vendor)}</td><td>${esc(l.vcontact)}</td><td>${esc(l.site)}</td><td>${esc(l.dept)}</td><td>${esc(l.by)}</td><td>${esc(l.note)}</td></tr>`).join('')||'<tr><td colspan="14" class="mu">尚無紀錄</td></tr>'}</table></div></div>`;
+ ${ls.slice(0,limL).map(l=>`<tr><td>${fmt(l.ts)}</td><td>${TL[l.type]||l.type}</td><td>${esc(l.name)}</td><td>${l.qty} ${esc(l.unit)}</td><td>${esc(l.price)}</td><td>${l.amt?Math.round(l.amt):''}</td><td>${esc(l.floor)}</td><td>${esc(l.place)}</td><td>${esc(l.vendor)}</td><td>${esc(l.vcontact)}</td><td>${esc(l.site)}</td><td>${esc(l.dept)}</td><td>${esc(l.by)}</td><td>${esc(l.note)}</td></tr>`).join('')||'<tr><td colspan="14" class="mu">尚無紀錄</td></tr>'}</table></div>${ls.length>limL?`<p><button class="b s" data-a="morel">顯示更多（還有 ${ls.length-limL} 筆）</button></p>`:''}</div>`;
 }
 function cfgView(){
  return `<div class="card"><h2>庫存設定</h2><label>預設安全庫存（所有資材庫存等於或低於此數量時通知管理人員；0＝不通知；個別資材可在資材資料另設）</label><input data-k="cmin" type="number" min="0" step="any" value="${esc(st.cmin??cfg().minDefault??'')}"><p><button class="b" data-a="savecfg">儲存</button></p></div>`;
@@ -532,12 +604,12 @@ document.addEventListener('click',async e=>{
  const two=(msgTxt,f)=>{if(t.dataset.c)f();else{t.dataset.c=1;t.textContent=msgTxt}};
  if(a==='logout'){e.preventDefault();me=null;try{sessionStorage.removeItem('fs_me')}catch(x){}tab=PAGE==='admin'?'adm':'out';render()}
  else if(a==='tab'){tab=id;sel=null;q='';editing=null;st={};render()}
- else if(a==='sub'){sub=id;editing=null;q='';st={};render()}
+ else if(a==='sub'){limP=30;limL=50;sub=id;editing=null;q='';st={};render()}
  else if(a==='pick'){if(inProd())editing=prods.find(p=>p.id===id);else pickProd(id);render();const qe=document.querySelector('[data-k=qty]');if(qe){qe.focus();qe.scrollIntoView({block:'center'})}}
  else if(a==='clearSel'){sel=null;st={};render()}
  else if(a==='gun'){const i=$('#q');i.focus();i.select()}
- else if(a==='cam'){$('#file').click()}
- else if(a==='fcam'){$('#file2').click()}
+ else if(a==='cam')openCam(scanCode,'#file');
+ else if(a==='fcam')openCam(c=>{$('#f_barcode').value=c},'#file2');
  else if(a==='addcart')addCart();
  else if(a==='submitOut')submitOut();
  else if(a==='rmcart'){cart.splice(+id,1);render()}
@@ -655,6 +727,10 @@ document.addEventListener('click',async e=>{
  }
  else if(a==='delloc')two('再按確認（資材位置文字不會被清除）',()=>db.collection('locs').doc(id).delete());
  else if(a==='xfer')doXfer(id);
+ else if(a==='expall')setAllCols(false);
+ else if(a==='colall')setAllCols(true);
+ else if(a==='morep'){limP+=30;renderList()}
+ else if(a==='morel'){limL+=50;render()}
  else if(a==='fsite'){fsite=id;try{localStorage.setItem('fs_site',id)}catch(x){}cart=[];sel=null;q='';st={};render()}
  else if(a==='savecfg')run(()=>db.doc('settings/main').set({minDefault:parseFloat(st.cmin??cfg().minDefault)||0}),'已儲存');
  else if(a==='logf'){logf=id;render()}
@@ -677,7 +753,7 @@ async function auth(){
  }catch(e){setMsg('登入失敗：'+(e.message||e),1)}
 }
 document.addEventListener('input',e=>{
- if(e.target.id==='q'){q=e.target.value;renderList()}
+ if(e.target.id==='q'){q=e.target.value;limP=30;renderList()}
  else if(e.target.dataset.k==='xq'){st.xq=e.target.value;const x=$('#xres');if(x)x.innerHTML=xferRes()}
  else if(e.target.dataset.k)st[e.target.dataset.k]=e.target.value;
 });
