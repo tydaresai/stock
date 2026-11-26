@@ -118,6 +118,18 @@ const isSuper=()=>scopeOf()==='*';
 const LV={designer:'設計者',chief:'總務最高管理者',director:'分場長',staff:'總務人員'};
 const TL={out:'領用',in:'入庫',tout:'調出',tin:'調入'};
 const canXfer=()=>['designer','chief','director'].includes(lvl());
+const canVoidLog=l=>{
+ if(l.void)return false;
+ if(isSuper())return true;
+ const mySite=scopeOf();
+ if(l.type==='out'||l.type==='in')return l.site===mySite;
+ if(l.type==='tout'||l.type==='tin'){
+  if(!canXfer())return false;
+  const pair=logs.find(x=>x.batch===l.batch&&x.type===(l.type==='tout'?'tin':'tout'));
+  return l.site===mySite||(pair&&pair.site===mySite);
+ }
+ return false;
+};
 const RANK={designer:4,chief:3,director:2,staff:1};
 const lvOf=u=>u.level||((u.scope??'*')==='*'?'designer':'staff');
 const lvl=()=>{const u=cu();return u?lvOf(u):''};
@@ -630,18 +642,45 @@ const logsF=()=>{
  return logs.filter(l=>{
   const xfer=l.type==='tout'||l.type==='tin';
   const siteOk=xfer?(!st.lsite||l.site===st.lsite):(!lim||l.site===lim);
-  return siteOk&&(logf==='all'||l.type===logf||(logf==='xfer'&&xfer))&&l.ts>=f&&l.ts<=t&&(!st.ldept||l.dept===st.ldept)&&(!st.lby||l.by===st.lby);
+  return (st.showVoid||!l.void)&&siteOk&&(logf==='all'||l.type===logf||(logf==='xfer'&&xfer))&&l.ts>=f&&l.ts<=t&&(!st.ldept||l.dept===st.ldept)&&(!st.lby||l.by===st.lby);
  });
 };
+async function voidLog(id){
+ const l=logs.find(x=>x.id===id);if(!l)return;
+ if(!canVoidLog(l))return setMsg('沒有權限作廢這筆紀錄',1);
+ const r3=x=>Math.round(x*1000)/1000,who=cu().name,at=Date.now();
+ try{
+  if(l.type==='out'){
+   const p=allProds.find(x=>x.id===l.pid);
+   await db.collection('logs').doc(l.id).update({void:true,voidBy:who,voidAt:at});
+   if(p)await db.collection('products').doc(p.id).update({qty:r3((p.qty||0)+l.qty)});
+   setMsg('已作廢領用紀錄：'+l.name+(p?'，已將數量歸還庫存':'（該資材已不存在，庫存未調整，請自行核對）'));
+  }else if(l.type==='in'){
+   const p=allProds.find(x=>x.id===l.pid);
+   await db.collection('logs').doc(l.id).update({void:true,voidBy:who,voidAt:at});
+   let neg=false;
+   if(p){const nq=r3((p.qty||0)-l.qty);await db.collection('products').doc(p.id).update({qty:nq});neg=nq<0}
+   setMsg('已作廢入庫紀錄：'+l.name+(p?'，已從庫存扣除':'（該資材已不存在，庫存未調整，請自行核對）')+(neg?'；扣除後庫存為負數，請到「資材」核對實際庫存':''),neg?1:0);
+  }else{
+   const pair=logs.find(x=>x.batch===l.batch&&x.type===(l.type==='tout'?'tin':'tout'));
+   const outL=l.type==='tout'?l:pair,inL=l.type==='tin'?l:pair;
+   await db.collection('logs').doc(l.id).update({void:true,voidBy:who,voidAt:at});
+   if(pair)await db.collection('logs').doc(pair.id).update({void:true,voidBy:who,voidAt:at});
+   if(outL){const p=allProds.find(x=>x.id===outL.pid);if(p)await db.collection('products').doc(p.id).update({qty:r3((p.qty||0)+outL.qty)})}
+   if(inL){const p=allProds.find(x=>x.id===inL.pid);if(p)await db.collection('products').doc(p.id).update({qty:r3((p.qty||0)-inL.qty)})}
+   setMsg('已作廢調撥紀錄（'+l.batch+'），已將雙邊場域的庫存復原');
+  }
+ }catch(e){setMsg('作廢失敗：'+(e.message||e),1)}
+}
 function batchList(type){
  const seen=new Set(),out=[];
- for(const l of logsF()){if(l.type!==type||!l.batch||seen.has(l.batch))continue;seen.add(l.batch);out.push(l)}
+ for(const l of logsF()){if(l.type!==type||!l.batch||l.void||seen.has(l.batch))continue;seen.add(l.batch);out.push(l)}
  return out.slice(0,20);
 }
 function printSlip(kind,batch){
  const type=kind==='req'?'out':'tout';
- const rows=logs.filter(l=>l.batch===batch&&l.type===type);
- if(!rows.length)return setMsg('找不到這張單據的明細',1);
+ const rows=logs.filter(l=>l.batch===batch&&l.type===type&&!l.void);
+ if(!rows.length)return setMsg('找不到這張單據的明細，或這張單據已全部作廢',1);
  const r0=rows[0],title=kind==='req'?'資材領用單':'資材調撥單';
  const w=window.open('','_blank');
  if(!w)return setMsg('瀏覽器擋住了列印視窗，請允許彈出視窗後再試一次',1);
@@ -694,7 +733,7 @@ function logView(){
  const ls=logsF(),sup=isSuper(),sc=scopeOf(),uq=a=>[...new Set(a.filter(Boolean))],o=a=>a.map(x=>[x,x]);
  const base=logs.filter(l=>sup||l.site===sc);
  const sl=(k,lb,a)=>`<div style="min-width:130px"><label>${lb}</label><select data-k="${k}">${opts(o(a),st[k],'全部')}</select></div>`;
- const nOut=ls.filter(l=>l.type==='out').length,amtOut=ls.filter(l=>l.type==='out').reduce((s,l)=>s+(Number(l.amt)||0),0),amtIn=ls.filter(l=>l.type==='in').reduce((s,l)=>s+(Number(l.amt)||0),0);
+ const nOut=ls.filter(l=>l.type==='out'&&!l.void).length,amtOut=ls.filter(l=>l.type==='out'&&!l.void).reduce((s,l)=>s+(Number(l.amt)||0),0),amtIn=ls.filter(l=>l.type==='in'&&!l.void).reduce((s,l)=>s+(Number(l.amt)||0),0),voidN=ls.filter(l=>l.void).length;
  return `<div class="card"><h2>領用／入庫紀錄${sup?'':'（'+esc(sc)+'）'}</h2>
  <div class="card"><h2>可列印的領用單（${batchList('out').length}）</h2>${batchList('out').map(l=>`<div class="item" style="cursor:default"><div><b>${esc(l.batch)}</b>｜${fmt(l.ts)}<br><small>${esc(l.site)} ${esc(l.dept)}｜領用人：${esc(l.by)}${l.agent?'｜代領：'+esc(l.agent):''}｜${esc(l.place)}</small></div><button class="b s sm" data-a="printreq" data-id="${esc(l.batch)}">列印領用單</button></div>`).join('')||'<p class="mu">此區間尚無領用單</p>'}</div>
  <div class="card"><h2>可列印的調撥單（${batchList('tout').length}）</h2>${batchList('tout').map(l=>{const dst=logs.find(x=>x.batch===l.batch&&x.type==='tin');return `<div class="item" style="cursor:default"><div><b>${esc(l.batch)}</b>｜${fmt(l.ts)}<br><small>${esc(l.site)} → ${esc(dst?dst.site:'')}｜經辦：${esc(l.by)}</small></div><button class="b s sm" data-a="printxfer" data-id="${esc(l.batch)}">列印調撥單</button></div>`}).join('')||'<p class="mu">此區間尚無調撥單</p>'}</div>
@@ -703,9 +742,10 @@ function logView(){
  <div class="row" style="flex-wrap:wrap">${sl('lsite','場域（影響調撥篩選；領用／入庫依您的權限）',uq(sites.map(x=>x.name).concat(logs.map(l=>l.site))))}${sl('ldept','科室',uq(base.map(l=>l.dept)))}${sl('lby','人員（領用／入庫）',uq(base.map(l=>l.by)))}</div>
  <div class="row"><div><label>起始日期</label><input type="date" data-k="lfrom" value="${V('lfrom')}"></div><div><label>結束日期</label><input type="date" data-k="lto" value="${V('lto')}"></div></div>
  <p><button class="b" data-a="expLogs">匯出紀錄（CSV，可用 Excel 開啟）</button></p>
- <p class="mu">符合條件 ${ls.length} 筆（領用 ${nOut} 筆、入庫 ${ls.filter(l=>l.type==='in').length} 筆、調撥 ${ls.filter(l=>l.type==='tout'||l.type==='tin').length} 筆；最多載入最近 1000 筆）｜領用金額 ${Math.round(amtOut).toLocaleString()} 元｜入庫金額 ${Math.round(amtIn).toLocaleString()} 元${ls.length>limL?'；畫面只顯示前 '+limL+' 筆，匯出為全部。':''}</p>
- <div class="wrap"><table><tr><th>時間</th><th>類別</th><th>資材</th><th>數量</th><th>單價</th><th>金額</th><th>位置</th><th>使用地點／作物</th><th>廠商</th><th>廠商聯絡</th><th>場域</th><th>科室</th><th>人員</th><th>備註</th></tr>
- ${ls.slice(0,limL).map(l=>`<tr><td>${fmt(l.ts)}</td><td>${TL[l.type]||l.type}</td><td>${esc(l.name)}</td><td>${l.qty} ${esc(l.unit)}</td><td>${esc(l.price)}</td><td>${l.amt?Math.round(l.amt):''}</td><td>${esc(l.floor)}</td><td>${esc(l.place)}</td><td>${esc(l.vendor)}</td><td>${esc(l.vcontact)}</td><td>${esc(l.site)}</td><td>${esc(l.dept)}</td><td>${esc(l.by)}</td><td>${esc(l.note)}</td></tr>`).join('')||'<tr><td colspan="14" class="mu">尚無紀錄</td></tr>'}</table></div>${ls.length>limL?`<p><button class="b s" data-a="morel">顯示更多（還有 ${ls.length-limL} 筆）</button></p>`:''}</div>`;
+ <p class="mu">符合條件 ${ls.length} 筆（領用 ${nOut} 筆、入庫 ${ls.filter(l=>l.type==='in'&&!l.void).length} 筆、調撥 ${ls.filter(l=>(l.type==='tout'||l.type==='tin')&&!l.void).length} 筆${voidN?'、已作廢 '+voidN+' 筆':''}；最多載入最近 1000 筆）｜領用金額 ${Math.round(amtOut).toLocaleString()} 元｜入庫金額 ${Math.round(amtIn).toLocaleString()} 元${ls.length>limL?'；畫面只顯示前 '+limL+' 筆，匯出為全部。':''}</p>
+ <p><label style="display:inline-flex;align-items:center;gap:6px;font-size:14px;color:var(--mu)"><input type="checkbox" data-k="showVoid" ${st.showVoid?'checked':''} style="width:auto">顯示已作廢紀錄（僅供查核，金額與統計已排除）</label></p>
+ <div class="wrap"><table><tr><th>時間</th><th>類別</th><th>資材</th><th>數量</th><th>單價</th><th>金額</th><th>位置</th><th>使用地點／作物</th><th>廠商</th><th>廠商聯絡</th><th>場域</th><th>科室</th><th>人員</th><th>備註</th><th>操作</th></tr>
+ ${ls.slice(0,limL).map(l=>`<tr${l.void?' style="opacity:.5;text-decoration:line-through"':''}><td>${fmt(l.ts)}</td><td>${TL[l.type]||l.type}</td><td>${esc(l.name)}</td><td>${l.qty} ${esc(l.unit)}</td><td>${esc(l.price)}</td><td>${l.amt?Math.round(l.amt):''}</td><td>${esc(l.floor)}</td><td>${esc(l.place)}</td><td>${esc(l.vendor)}</td><td>${esc(l.vcontact)}</td><td>${esc(l.site)}</td><td>${esc(l.dept)}</td><td>${esc(l.by)}</td><td>${esc(l.note)}</td><td style="text-decoration:none">${l.void?`已作廢<br><small>${esc(l.voidBy||'')}</small>`:(canVoidLog(l)?`<button class="b d sm" data-a="voidlog" data-id="${esc(l.id)}">作廢</button>`:'')}</td></tr>`).join('')||'<tr><td colspan="15" class="mu">尚無紀錄</td></tr>'}</table></div>${ls.length>limL?`<p><button class="b s" data-a="morel">顯示更多（還有 ${ls.length-limL} 筆）</button></p>`:''}</div>`;
 }
 function cfgView(){
  return `<div class="card"><h2>庫存設定</h2><label>預設安全庫存（所有資材庫存等於或低於此數量時通知管理人員；0＝不通知；個別資材可在資材資料另設）</label><input data-k="cmin" type="number" min="0" step="any" value="${esc(st.cmin??cfg().minDefault??'')}"><p><button class="b" data-a="savecfg">儲存</button></p></div>`;
@@ -872,6 +912,7 @@ document.addEventListener('click',async e=>{
  else if(a==='fsite'){fsite=id;try{localStorage.setItem('fs_site',id)}catch(x){}cart=[];sel=null;q='';st={};render()}
  else if(a==='savecfg')run(()=>db.doc('settings/main').set({minDefault:parseFloat(st.cmin??cfg().minDefault)||0}),'已儲存');
  else if(a==='logf'){logf=id;render()}
+ else if(a==='voidlog')two('再按一次確認作廢（會同時復原庫存，且可被查核）',()=>voidLog(id));
  else if(a==='printreq')printSlip('req',id);
  else if(a==='printxfer')printSlip('xfer',id);
  else if(a==='lowOk'||a==='lowView'){prods.filter(isLow).forEach(p=>ack.add(p.id+':'+(p.qty||0)));if(a==='lowView'){tab='adm';sub='prod';q='';editing=null}render()}
@@ -919,6 +960,7 @@ document.addEventListener('change',async e=>{
  if(t.dataset.scf){try{await db.collection('sites').doc(t.dataset.sid).update({code:t.value.trim().toUpperCase()})}catch(x){setMsg('更新失敗：'+(x.message||x),1)}return}
  if(k==='vendor'){st.vendor=t.value;if(!st.vcontact){const p=prods.find(x=>x.id===sel),c=vInfo(p&&p.site,t.value);if(c){st.vcontact=c;render()}}return}
  if(k==='asite'){asite=t.value;try{sessionStorage.setItem('fs_asite',asite)}catch(x){}sel=null;q='';st={};render();return}
+ if(k==='showVoid'){st.showVoid=t.checked;render();return}
  if(k){st[k]=t.value;if(k==='dept'||k==='site'||k==='es'){st.person='';if(k==='es')st.ed='';render()}else if(['lfrom','lto','lsite','ldept','lby','xdest'].includes(k))render();return}
  const f=t.files&&t.files[0];if(!f)return;t.value='';
  if(t.id==='file'||t.id==='fileup')readPhoto(f,scanCode);
